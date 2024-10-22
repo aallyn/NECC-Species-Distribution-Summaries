@@ -19,7 +19,9 @@ library(matrixStats)
 library(patchwork)
 library(broom)
 
-species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
+# species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
+species<- read_csv(here::here("Data/species_list_from_decadal_project.csv")) |>
+  mutate_if(is.character, tolower)
 
 # Load NEFSC Bottom Trawl Survey data ####
 trawl_data <- gmri_survdat_prep(
@@ -120,13 +122,13 @@ library(ecodata)
 species_groupings <- ecodata::species_groupings # from ecodata
 species_upper <- species %>% summarise(COMNAME = toupper(comname))
 
-garrison_link <- species_groupings %>% 
-  filter(!is.na(Garrison.Link)) %>% 
+soe_24 <- species_groupings %>% 
+  filter(!is.na(SOE.24)) %>% 
   filter(COMNAME %in% species_upper$COMNAME) %>% 
   arrange(COMNAME) %>%
-  select(COMNAME, Garrison.Link, SizeCat) %>% 
+  select(COMNAME, SOE.24) %>%   
+  filter(SOE.24 != "Benthos") |>
   distinct()
-
 ```
 
 
@@ -135,7 +137,6 @@ garrison_link <- species_groupings %>%
 #| echo: false
 #| messaage: false
 #| warning: false
-
 library(lme4)
 
 # build data frame with seasonal distance, seasonal year-day difference, species groups and year
@@ -149,12 +150,12 @@ seasonal_dist %>%
   select(comname, est_year, dist_km) %>% 
   mutate(COMNAME = toupper(comname)) %>% 
   left_join(delta_year_day %>% select(est_year, delta_year_day)) %>%
-  left_join(garrison_link) %>%
+  left_join(soe_24) %>%
   filter(!est_year %in% c(2017, 2020)) %>% 
-  mutate(species = paste(str_to_sentence(comname), SizeCat, sep = "-")) %>% # treating species that have different feeding guilds according to size categories as different entities
+  mutate(species = paste(str_to_sentence(comname))) %>% # treating species that have different feeding guilds according to size categories as different entities
   drop_na() %>% 
   ungroup() %>% 
-  select(!c(COMNAME, SizeCat)) -> lme
+  select(!c(COMNAME)) -> lme
 
 # lme %>% 
 #   group_by(species) %>% 
@@ -167,10 +168,28 @@ seasonal_dist %>%
 
 #########
 
+# Checking out response?
+hist(lme$dist_km)
+hist(log(lme$dist_km))
 
-model <- lmer(dist_km ~ delta_year_day + est_year*Garrison.Link + (1|est_year) + (1|species), data = lme) # using species to differentiate size class
+summary(lme)
 
+lme<- lme |>
+  mutate("year_fac" = factor(est_year))
+
+model <- lmer(log(dist_km) ~ delta_year_day + est_year*SOE.24 + (1|year_fac) + (1|species), data = lme) # using species to differentiate size class
+
+# Gamma distributions
 summary(model, correlation = TRUE)
 
+# Adding ggpredict to visualize
+t1<- ggpredict(model, ~ est_year*SOE.24)
+plot(t1)
 ```
+
+# What to do next
+- Dig into the planktivore species, look back to what is happening to trailing/leading/COG dynamics over time -- big implications for ecosystem/structure and food web dynamics as it seems like these are key forage species
+- "Flat" line for piscivores could be because some are increasing, some are decreasing
+- New model: Drop SOE 24 and then add species as FE, gets you a slope for each species -- `model <- glmmTMB(dist_km ~ delta_year_day + est_year*species + (1|year_fac), family = Gamma(link = "log"), data = lme)` and then change to Gamma (log link) and just use dist_km as response (don't use log transformed). Check the formula as I just did that off the top of my head for family/link :)
+- Extract slope/CI for each species, generate plot, and color by SOE.24 grouping
 

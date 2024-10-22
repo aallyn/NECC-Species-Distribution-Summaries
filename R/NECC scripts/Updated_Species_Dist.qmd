@@ -24,8 +24,11 @@ library(gmRi)
 library(matrixStats)
 library(patchwork)
 library(broom)
+library(snakecase)
 
-species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
+# species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
+species<- read_csv(here::here("Data/species_list_from_decadal_project.csv")) |>
+  mutate_if(is.character, tolower)
 
 # Load NEFSC Bottom Trawl Survey data ####
 trawl_data <- gmri_survdat_prep(
