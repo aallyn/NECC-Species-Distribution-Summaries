@@ -18,7 +18,7 @@ This folder contains the list of fishes included in the NECC study as well as th
 
 Within the folder there are two subfolders entitled **NECC** and **Continuing work scripts.**
 
-**NECC** contains four R files from late 2021,
+**NECC** contains four R files from late 2022,
 
 -   `helper_funcs.R`
 -   `01_SurveyDataPrep.R`
