@@ -7,7 +7,7 @@ library(here)
 library(tidyverse)
 
 # Make sure gmRi package is up to date!!
-devtools::install_github("https://github.com/gulfofmaine/gmRi")
+devtools::install_github("https://github.com/gulfofmaine/gmRi", force = TRUE)
 library(gmRi)
 
 ## Start work
