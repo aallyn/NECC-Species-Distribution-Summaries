@@ -4,6 +4,8 @@ author: "cslovas"
 format: 
   html:
     toc: true
+    toc_float: 
+      collapsed: false
     self-contained: true
 editor: visual
 ---
@@ -24,11 +26,10 @@ library(gmRi)
 library(matrixStats)
 library(patchwork)
 library(broom)
-library(snakecase)
+library(rmarkdown)
+library(shiny)
 
-# species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
-species<- read_csv(here::here("Data/species_list_from_decadal_project.csv")) |>
-  mutate_if(is.character, tolower)
+species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
 
 # Load NEFSC Bottom Trawl Survey data ####
 trawl_data <- gmri_survdat_prep(
@@ -93,6 +94,7 @@ with_season %>%
   pivot_longer(cols = lat:lon, names_to = "variable", values_to = "data") %>% 
   unnest(data) %>% 
   select(comname, variable, estimate, p.value) -> with_season_coeff
+
 ```
 
 ```{r}
@@ -128,36 +130,47 @@ without_season %>%
 #| message: false
 #| warning: false
 
+## CRS 32619 = degrees
+## CRS 4326 = meters
+
+
 # is the difference in spring and fall centers of biomass changing over time?
 seasonal_dist <- with_season %>% 
   unnest(data) %>% 
   select(comname, est_year, season, avg_lat, avg_lon, avg_depth) %>%
-  # mutate(rollmean_lat = zoo::rollapplyr(avg_lat, width = 5, FUN = mean, align = "center", partial = T),
-  #        rollmean_lon = zoo::rollapplyr(avg_lon, width = 5, FUN = mean, align = "center", partial = T))%>% # maybe include depth changes later
   group_by(comname, est_year ) %>% 
   nest() 
 
 point_dist <- function(df){
   temp <- sf::st_as_sf(df,coords=c("avg_lon","avg_lat"), crs=4326, remove=FALSE)
-  # temp <- sf::st_as_sf(df,coords=c("rollmean_lon","rollmean_lat"), crs=4326, remove=FALSE)
-  out  <- sf::st_distance(temp)[1,2]
+  temp <- sf::st_transform(temp, crs = 4326)
+  out  <- sf::st_distance(temp$geometry)[1,2]
   return(out)
 }
 
-seasonal_dist %>% 
-  mutate(dist    = map_dbl(data, possibly(point_dist, NA)),
-         dist_km = dist/1000)%>% 
+
+# df <- seasonal_dist %>% 
+#   filter(comname == "acadian redfish") %>% 
+#   unnest()
+# 
+# sf::st_crs(temp$geometry)
+
+
+seasonal_dist <- seasonal_dist %>% 
+  mutate(dist_m    = map_dbl(data, possibly(point_dist, NA)), 
+         dist_km = dist_m/1000) %>% 
+  filter(!is.na(dist_m)) %>% 
   group_by(comname) %>% 
   nest() %>% 
   mutate(count = map_dbl(data, function(x){nrow(x)}), 
-         season_dist = map(data, function(x){lm(dist_km ~ est_year, data = x) %>% 
+         season_dist = map(data, function(x){
+           lm(dist_km ~ est_year, data = x) %>% 
                           tidy() %>% 
                           filter(term == "est_year")})) %>% 
   unnest(season_dist) %>% 
-  mutate(signif = ifelse(p.value <= 0.05, T, F)) -> seasonal_dist 
-
-# save out 
-write_rds(seasonal_dist, here("Data","seasonal_dist.rds"))
+  mutate(signif = ifelse(p.value <= 0.05, T, F)) 
+# save out
+# write_rds(seasonal_dist, here("Data","seasonal_dist.rds"))
 ```
 
 ```{r}
@@ -184,10 +197,7 @@ seasonal_dist %>%
   scale_color_gmri()+
   ylim(c(-4,4)) +
   geom_hline(yintercept = 0, linetype = 2, linewidth = 0.5, color = "black")+
-  ylab("Rate of change (km/year)") + ggtitle("Changes in seasonal distance") # -> plot
-# 
-# ggsave(filename = "change_in_seasonal_distance.pdf", plot,  height = 8.5, width = 11, units = "in")
-
+  ylab("Rate of change (km/year)") + ggtitle("Changes in seasonal distance") 
 
 # plot the distance between centroids each year for each species 
 seasonal_dist %>% 
@@ -237,39 +247,39 @@ seasonal_dist %>%
 #| fig-width: 9
 #| fig-align: center
 
-
 with_season %>% 
-  select(comname, data) %>% 
-  mutate(map = map2(data, comname, function(x,y){
-    us <- rnaturalearth::ne_states(country = "united states of america")
-    x  <- x %>% 
-      mutate(decade = 10*est_year %/% 10) 
-    plot <- ggplot() +
-      geom_sf(data = us) +
-      coord_sf(xlim = c(-66,-76), ylim = c(38,48)) +
-      # ggtitle(str_to_sentence(comname)) + 
-      ggtitle("Season center of biomass by decade") +
-      ylab("Latitude") + xlab("Longitude") + 
-      scale_x_continuous(breaks = c(-68, -71, -74)) +
-      scale_y_continuous(breaks = c(38, 43, 48)) +
-      geom_point(data = x, aes(x = avg_lon, y = avg_lat, color = season)) +
-      scale_color_gmri() + 
-      guides(color = guide_legend(title = "Season")) +
-      facet_wrap(~decade, nrow = 1) +
-      theme_gmri(strip.background = element_rect(fill = "transparent", linetype = 1, linewidth = 1, color = "#e9e9e9"),
-                 strip.text = element_text(color = "black"),
-                 # axis.title = element_text(color = "#535353"),
-                 # axis.text = element_text(color = "#535353"),
-                 axis.line = element_line(color = "#e9e9e9"),
-                 axis.ticks = element_line(color = "#e9e9e9"),
-                 plot.title = element_text(size = 12),
-                 panel.border = element_rect(color = "#e9e9e9", linetype = 1, linewidth = 1),
-                 panel.grid.major = element_line(color = "#e9e9e9"))  
-    
-    return(plot)
-  })) -> with_season
+      select(comname, data) %>% 
+      mutate(map = map2(data, comname, function(x,y){
+        us <- rnaturalearth::ne_states(country = "united states of america")
+        x  <- x %>% 
+          mutate(decade = 10*est_year %/% 10) 
+        plot <- ggplot() +
+          geom_sf(data = us) +
+          coord_sf(xlim = c(-66,-76), ylim = c(36,48)) +
+          # ggtitle(str_to_sentence(comname)) + 
+          ggtitle("Season center of biomass by decade") +
+          ylab("Latitude") + xlab("Longitude") + 
+          scale_x_continuous(breaks = c(-68, -71, -74)) +
+          scale_y_continuous(breaks = c(38, 43, 48)) +
+          geom_point(data = x, aes(x = avg_lon, y = avg_lat, color = season)) +
+          scale_color_gmri() + 
+          guides(color = guide_legend(title = "Season")) +
+          facet_wrap(~decade, nrow = 1) +
+          theme_gmri(strip.background = element_rect(fill = "transparent", linetype = 1, linewidth = 1, color = "#e9e9e9"),
+                     strip.text = element_text(color = "black"),
+                     # axis.title = element_text(color = "#535353"),
+                     # axis.text = element_text(color = "#535353"),
+                     axis.line = element_line(color = "#e9e9e9"),
+                     axis.ticks = element_line(color = "#e9e9e9"),
+                     plot.title = element_text(size = 12),
+                     panel.border = element_rect(color = "#e9e9e9", linetype = 1, linewidth = 1),
+                     panel.grid.major = element_line(color = "#e9e9e9"))  
+        
+        return(plot)
+      })) -> with_season
 
-# with_season$map[[1]]
+    bsb_map <- with_season$map[[11]]
+    ggsave("bsb_map.png", bsb_map)
 
 ```
 
@@ -299,6 +309,64 @@ with_season %>%
   })) -> with_season
 
 # with_season$time_series[[40]]
+
+```
+
+```{r}
+#| label: temp at centroid
+#| echo: false
+#| message: false
+#| warning: false
+
+with_season %>% 
+  unnest(data) %>%
+  select(comname, est_year, season, avg_sur_temp) %>% 
+  pivot_wider(names_from = "season", values_from = "avg_sur_temp") %>% 
+  mutate(difference = abs(Fall-Spring)) -> delta_sst
+
+with_season %>% 
+  unnest(data) %>%
+  select(comname, est_year, season, avg_bot_temp) %>% 
+  pivot_wider(names_from = "season", values_from = "avg_bot_temp") %>% 
+  mutate(difference = abs(Fall-Spring)) -> delta_bt
+
+delta_sst %>% 
+  group_by(comname) %>% 
+  nest() %>% 
+  mutate(sst_plot = map(data, function(x){
+    x <- x %>% 
+      pivot_longer(cols = c("Fall","Spring"), names_to = "season", values_to = "value")
+    
+    ggplot(data = x) + 
+      geom_line(aes(x = est_year, y = value, group = est_year), color = "#535353", alpha = 0.8) +
+      geom_point(aes(x = est_year, y = value, color = season)) +
+      ggtitle("Sea Surface Temperature at Center of Biomass") +
+      xlab("Year") + ylab("SST") +
+      scale_color_gmri() +
+      theme_gmri()
+    })) %>% 
+  select(!data) -> delta_sst
+
+# delta_sst$sst_plot[[1]]
+
+delta_bt %>% 
+  group_by(comname) %>% 
+  nest() %>% 
+  mutate(bt_plot = map(data, function(x){
+    x <- x %>% 
+      pivot_longer(cols = c("Fall","Spring"), names_to = "season", values_to = "value")
+    
+    ggplot(data = x) + 
+      geom_line(aes(x = est_year, y = value, group = est_year), color = "#535353", alpha = 0.8) +
+      geom_point(aes(x = est_year, y = value, color = season)) +
+      ggtitle("Bottom Temperature at Center of Biomass") +
+      xlab("Year") + ylab("BT") +
+      scale_color_gmri() +
+      theme_gmri()
+    })) %>%
+  select(!data) -> delta_bt
+
+# delta_bt$bt_plot[[1]]
 
 ```
 
@@ -345,32 +413,22 @@ quantiles %>%
   nest() %>% 
   summarise(percentiles = map2(data, comname, function(x,y){
     out <- ggplot(data = x) +
-      geom_line(aes(x = est_year, y = rollmean, color = quantile)) +
-      geom_smooth(aes( x = est_year, y = rollmean, color = quantile), method = "lm", linetype = 2, alpha = 0.5, linewidth = 0.5, se = FALSE) +
-      scale_color_gmri() +
+      geom_line(aes(x = est_year, y = rollmean, color = factor(quantile))) +
+      geom_smooth(aes( x = est_year, y = rollmean, color = factor(quantile)), method = "lm", linetype = 2, alpha = 0.5, linewidth = 0.5, se = FALSE) +
+      scale_color_manual(values = c("#ea4f12", "#00608a")) +
       ggtitle("Leading and trailing edge") +
       guides(color = guide_legend(title = "Percentile")) +
       ylab("Latitude (5-year rolling mean)") +
       xlab("Year") +
       facet_wrap(~season, ncol = 2) +
+      guides(col = guide_legend(levels = c(`95%`, `5%`), title = "quantile")) +
       theme_gmri(strip.background = element_rect(fill = "transparent", linetype = 1, linewidth = 1, color = "transparent"),
                  strip.text = element_text(color = "black", hjust = 0),
                  plot.title = element_text(size = "12"))
-                 # axis.title = element_text(color = "#535353"),
-                 # axis.text = element_text(color = "#535353"))
-                 # axis.line = element_line(color = "#e9e9e9"),
-                 # axis.ticks = element_line(color = "#e9e9e9"),
-                 # panel.border = element_rect(color = "#e9e9e9", linetype = 1, linewidth = 1),
-                 # panel.grid.major = element_line(color = "#e9e9e9"))
-    
     return(out)
   })) -> percentiles
 
 # percentiles$percentiles[[40]]
-
-with_season <- with_season %>%
-  left_join(percentiles) %>%
-  left_join(dist_plot)
 
 ```
 
@@ -386,24 +444,47 @@ with_season <- with_season %>%
 library(grid)
 library(gridExtra)
 
-with_season %>% 
-  select(!data) %>% 
+with_season <- with_season %>%
+  left_join(percentiles) %>%
+  left_join(dist_plot) %>% 
+  left_join(delta_sst) %>% 
+  left_join(delta_bt) %>% 
+  select(!data)
+
+with_season %>%
   group_by(comname) %>%
-  nest() %>% 
+  nest() %>%
   mutate(species_profile = map2(data, comname, function(x,y){
     map <- x$map[[1]]
     times_series <- x$time_series[[1]]
     distance <- x$dist_plot[[1]]
     percentiles  <- x$percentiles[[1]]
+    sst <- x$sst_plot[[1]]
+    bt <- x$bt_plot[[1]]
 
-    out <- grid.arrange(map, times_series, distance, percentiles, nrow = 3, layout_matrix=rbind(c(1,1), c(2,3), c(4,4)), top = textGrob(paste(str_to_sentence(comname)), gp = gpar(col = "black", fontsize = 15, fontface = "bold")))
-  })) -> species_profiles 
+    out <- grid.arrange(map, times_series, distance, percentiles, sst, bt, nrow = 5, layout_matrix=rbind(c(1,1), c(2,3), c(4,4), c(5,6)), top = textGrob(paste(str_to_sentence(comname)), gp = gpar(col = "black", fontsize = 15, fontface = "bold")))
+  })) -> species_profiles
 
 ```
 
 ```{r}
-# remotes::install_github("noaa-edab/ecodata",build_vignettes=TRUE)
-# library(ecodata)
-# ecodata::species_groupings
+#| label: heatmap test
+#| echo: false
+
+# with_season %>% 
+#   filter(comname == "alewife") %>% 
+#   mutate(avg_lat = round(avg_lat, digits = 1),
+#          avg_lon = round(avg_lon, digits = 1)) %>% 
+#   group_by(avg_lat, avg_lon, season) %>% 
+#   summarise(avg_biomass = mean(total_biomass)) -> heatmap
+# 
+# ggplot(heatmap) +
+#   geom_tile(aes(x=avg_lon, y = avg_lat, alpha = avg_biomass), fill = "#00608A") +
+#   facet_wrap(~season) +
+#    theme_gmri(panel.grid.major = element_line(color = "#e9e9e9", linetype = 1),
+#               panel.grid.minor = element_line(color = "#e9e9e9", linetype = 1),
+#              axis.line = element_blank(),
+#              axis.text.y = element_text(size = 6)) 
+
 
 ```

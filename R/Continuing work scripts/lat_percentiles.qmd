@@ -1,10 +1,19 @@
 ---
 title: "Latitude Percentiles"
-author: "cslovas"
-format: 
-  html:
-    toc: true
-    self-contained: true
+# author: "cslovas"
+format:
+    # html:
+    #   toc: true
+    #   self-contained: true
+  pdf:
+    toc: false
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - top=5mm
+      - left=5mm
+      - bottom=5mm
+      - heightrounded
 editor: visual
 ---
 
@@ -24,10 +33,13 @@ library(ggridges)
 library(gt)
 
 # species data
-species <- read_csv("/Users/clovas/Documents/necc_distributions/Data/speciesList_inNECC.csv") %>%
-  rename("comname" = "Species_comnam") %>%
-  mutate(comname   = tolower(comname)) %>%
-  select(comname)
+# species <- read_csv("/Users/clovas/Documents/necc_distributions/Data/speciesList_inNECC.csv") %>%
+#   rename("comname" = "Species_comnam") %>%
+#   mutate(comname   = tolower(comname)) %>%
+#   select(comname)
+
+# species data [decadal variability]
+species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv")
 
 # Load NEFSC Bottom Trawl Survey data ####
 trawl_data <- gmri_survdat_prep(
@@ -35,6 +47,7 @@ trawl_data <- gmri_survdat_prep(
   box_location ="cloudstorage")
 
 clean_survey  <- trawl_data %>% 
+  filter(est_year >= 1970) %>% 
   distinct(svspp, est_year, survey_area, stratum, tow, id, est_towdate, season, comname, catchsex, .keep_all = T) %>%
   group_by(svspp, est_year, survey_area, stratum, tow, id, est_towdate, season, 
            avgdepth, surftemp, bottemp, decdeg_beglat, decdeg_beglon, comname, abundance) %>% 
@@ -71,7 +84,7 @@ grouped_quantiles <- function(clean_survey, ...){
     mutate(across(where(is.numeric), round, 4))
 }
 
-quantiles <- grouped_quantiles(clean_survey, est_year)
+quantiles <- grouped_quantiles(clean_survey, est_year, season)
 
 ```
 
@@ -82,18 +95,18 @@ quantiles <- grouped_quantiles(clean_survey, est_year)
 #| warning: false
 
 quantiles %>% 
-  pivot_longer(cols = 6:12, names_to = "quantile", values_to = "lat") %>%
-  select(comname, est_year, quantile, lat) %>%
+  pivot_longer(cols = 7:13, names_to = "quantile", values_to = "lat") %>%
+  select(comname, season, est_year, quantile, lat) %>%
   filter(quantile %in% c("5%", "50%", "95%")) %>%
-  group_by(comname, quantile) %>%
+  group_by(comname, season, quantile) %>%
   mutate(rollmean = zoo::rollapplyr(lat, width = 5, FUN = mean, align = "center", partial = T)) %>%
-  group_by(comname, quantile) %>%
+  group_by(comname, season, quantile) %>%
   nest() %>%
   mutate(mod  = map(data, function(x){lm(est_year ~ rollmean, data = x)}),
          tidy = map(mod, broom::tidy)) -> mods
 
 slopes <- mods %>%
-  select(comname, quantile, tidy) %>%
+  select(comname, season, quantile, tidy) %>%
   unnest(tidy) %>%
   filter(!term == "(Intercept)") %>%
   rename("slope" = "estimate") %>%
@@ -101,68 +114,50 @@ slopes <- mods %>%
   mutate(signif   = ifelse(p.value <= 0.05, "true", "false"),
          movement = ifelse(slope > 0, "+", "-"))
 
+# trends
 slopes %>% 
-  filter(quantile  == "5%") %>%
-  mutate(trend = NA) -> fifth
-
-fifth$trend[fifth$movement == "+" & fifth$signif  == "true"]  = "northward"
-fifth$trend[fifth$movement == "+" & fifth$signif  == "false"] = "stable"
-fifth$trend[fifth$movement == "-" & fifth$signif == "false"] = "stable"
-fifth$trend[fifth$movement == "-" & fifth$signif == "true"]  = "southward"
-
-slopes %>% 
-  filter(quantile  == "95%") %>%
-  mutate(trend = NA) -> ninetyfifth
-
-ninetyfifth$trend[ninetyfifth$movement == "+" & ninetyfifth$signif  == "true"]  = "northward"
-ninetyfifth$trend[ninetyfifth$movement == "+" & ninetyfifth$signif  == "false"] = "stable"
-ninetyfifth$trend[ninetyfifth$movement == "-" & ninetyfifth$signif == "false"] = "stable"
-ninetyfifth$trend[ninetyfifth$movement == "-" & ninetyfifth$signif == "true"]  = "southward"
+  select(comname, season, quantile, signif, movement) %>% 
+  filter(signif == "true" & movement == "+") %>%
+  mutate(trend = "northward") %>%
+  full_join(slopes %>% 
+              select(comname, season, quantile, signif, movement) %>% 
+              filter(signif == "true" & movement == "-") %>%
+              mutate(trend = "southward")) %>%
+  full_join(slopes %>% 
+              select(comname, season, quantile, signif, movement) %>% 
+              filter(signif == "false" & movement == "-" | signif == "false" & movement == "+") %>%
+              mutate(trend = "stable")) %>%
+  arrange(comname, quantile) %>%
+  select(comname, season, quantile, trend) %>%
+  pivot_wider(names_from = "quantile", values_from = "trend") -> trends
 
 
-trends <- fifth %>%
-  full_join(ninetyfifth) %>% 
-  select(comname, quantile, trend) %>% 
-  pivot_wider(names_from = quantile, values_from = trend) %>%
-  mutate(classification = NA)
+trends %>%
+  filter(`5%` == "stable" & `50%` == "stable" & `95%` == "stable") %>% 
+  mutate(distribution = "stable") %>% 
+  full_join(trends %>%
+              filter(`5%` == "northward" & `50%` == "northward" & `95%` == "northward"| 
+                     `5%` == "southward" & `50%` == "southward" & `95%` == "southward") %>% 
+              mutate(distribution = "march")) %>%
+  full_join(trends %>%
+              filter(`5%` == "southward" & `95%` == "northward") %>% 
+              mutate(distribution = "expand")) %>%
+  full_join(trends %>%
+              filter(`5%` == "northward" & `95%` == "southward") %>% 
+              mutate(distribution = "contract")) %>%
+  full_join(trends %>%
+              filter(`5%` == "stable"    & `50%` == "northward" & `95%` == "northward"|
+                     `5%` == "northward" & `50%` == "northward" & `95%` == "stable"|
+                     `5%` == "stable"    & `50%` == "southward" & `95%` == "southward"|
+                     `5%` == "southward" & `50%` == "southward" & `95%` == "stable") %>% 
+              mutate(distribution = "lean")) %>%
+  full_join(trends %>%
+              filter(`5%` == "northward" & `50%` == "stable" & `95%` == "stable" |
+                     `5%` == "stable"    & `50%` == "stable" & `95%` == "southward") %>% 
+              mutate(distribution = "retract")) %>%
+  full_join(trends) %>% 
+  arrange(comname) -> trends
 
-trends$classification[trends$`5%` == "northward" & trends$`95%` == "northward"] = "march - northward"
-trends$classification[trends$`5%` == "northward" & trends$`95%` == "southward"] = "retract"
-trends$classification[trends$`5%` == "southward" & trends$`95%` == "northward"] = "expand"
-trends$classification[trends$`5%` == "stable"    & trends$`95%` == "stable"]    = "stable"
-trends$classification[trends$`5%` == "stable"    & trends$`95%` == "northward"] = "expand - northward"
-trends$classification[trends$`5%` == "southward" & trends$`95%` == "southward"] = "march - southward"
-trends$classification[trends$`5%` == "southward" & trends$`95%` == "stable"]    = "expand - southward"
-trends$classification[trends$`5%` == "northward" & trends$`95%` == "stable"] = "lean - northward"
-trends$classification[trends$`5%` == "stable" & trends$`95%` == "southward"] = "lean - southward"
-
-
-trends %>% 
-  gt(groupname_col = NULL) %>%
-  cols_label(
-    comname = md("**Common name**"),
-    `5%`    = md("**5th percentile**"),
-    `95%`   = md("**95th percentile**"),
-    classification = md("**Movement classification**")
-  ) -> movement_table
-
-# gtsave(movement_table, here("movement_table.png"))
-
-# slopes %>% 
-#   select(comname, quantile, estimate) %>%
-#   filter(estimate > 0) %>%
-#   pivot_wider(names_from = quantile, values_from = estimate) %>%
-#   drop_na() %>% 
-#   mutate(movement = ifelse(`5%` > `95%`, "lean", "march")) -> northward
-# 
-# slopes %>%
-#   select(comname, quantile, estimate) %>%
-#   filter(!comname %in% northward$comname) %>%
-#   pivot_wider(names_from = quantile, values_from = estimate) %>%
-#   mutate(movement = ifelse(`5%` > 0 & `95%` < 0, "retract", "expand")) %>%
-#   full_join(northward) -> movement_trends
-# 
-# movement_trends$movement[0 > movement_trends$`5%` & 0 > movement_trends$`95%`] = "southward"
 
 ```
 
@@ -173,22 +168,29 @@ trends %>%
 #| warning: false
 #| column: page
 #| fig-align: center
-#| fig-height: 9
-#| fig-width: 12
+#| fig-height: 11
+#| fig-width: 9
 
 lat_shift <- quantiles %>% 
-  pivot_longer(cols = 6:12, names_to = "quantile", values_to = "lat") %>%
-  select(comname, est_year, quantile, lat) %>%
-  group_by(comname, quantile) %>%
+  pivot_longer(cols = 7:13, names_to = "quantile", values_to = "lat") %>%
+  select(comname, season, est_year, quantile, lat) %>%
+  group_by(comname, season, quantile) %>%
   mutate(rollmean = zoo::rollapplyr(lat, width = 5, FUN = mean, align = "center", partial = T)) %>%
-  left_join(trends %>% select(comname, classification)) %>%
+  left_join(trends %>% select(comname, distribution)) %>%
+  group_by(comname) 
+
+lat_shift$factor <- factor(lat_shift$quantile, levels = rev(c("5%","10%","25%","50%","75%","90%","95%")))
+
+lat_shift <- lat_shift %>% 
   group_by(comname) %>% 
   nest() %>% 
   mutate(plot = map2(data, comname, function(x,y){
     out <- ggplot(x) +
-      geom_line(aes(x = est_year, y = rollmean, color = quantile), linetype = 2) +
-      geom_smooth(aes(x = est_year, y = rollmean, color = quantile), method = "lm", se = F) +
+      geom_line(aes(x = est_year, y = rollmean, color = factor), linetype = 2) +
+      geom_smooth(aes(x = est_year, y = rollmean, color = factor), method = "lm", se = F) +
       ylab("Latitude") + xlab("Year") + ggtitle(str_to_sentence(comname), subtitle = x$classification) + 
+      facet_wrap(~season, nrow = 1) +
+      guides(color = guide_legend("Percentiles")) +
       scale_color_gmri() +
       theme_gmri()
     
@@ -199,7 +201,7 @@ lat_shift <- quantiles %>%
 # lat_shift$plot[[27]]
 
 # all_lat_shift <- 
-gridExtra::marrangeGrob(lat_shift$plot, layout_matrix = matrix(1:2, nrow = 2, ncol = 1, byrow = TRUE), top = NULL)
+gridExtra::marrangeGrob(lat_shift$plot, layout_matrix = matrix(1:3, nrow = 3, ncol = 1, byrow = TRUE), top = NULL)
 
 # ggsave(all_lat_shift, file=here("all_latitudinal_shifts.pdf"), width = 8.5, height = 11, units = "in")
 

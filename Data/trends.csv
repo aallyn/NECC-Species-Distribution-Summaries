@@ -1,0 +1,97 @@
+comname,season,5%,50%,95%,distribution
+acadian redfish,Spring,stable,stable,stable,stable
+acadian redfish,Fall,southward,stable,stable,NA
+alewife,Spring,northward,northward,northward,march
+alewife,Fall,northward,stable,northward,NA
+american lobster,Fall,northward,northward,northward,march
+american lobster,Spring,northward,northward,northward,march
+american plaice,Fall,northward,northward,southward,contract
+american plaice,Spring,northward,stable,southward,contract
+american shad,Spring,northward,northward,northward,march
+american shad,Fall,stable,stable,northward,NA
+atlantic cod,Fall,northward,stable,southward,contract
+atlantic cod,Spring,northward,northward,stable,lean
+atlantic hagfish,Spring,northward,northward,northward,march
+atlantic hagfish,Fall,southward,stable,northward,expand
+atlantic herring,Fall,southward,southward,northward,expand
+atlantic herring,Spring,stable,stable,northward,NA
+atlantic mackerel,Spring,northward,northward,northward,march
+atlantic mackerel,Fall,northward,northward,stable,lean
+atlantic rock crab,Spring,northward,northward,northward,march
+atlantic rock crab,Fall,southward,southward,northward,expand
+black sea bass,Fall,northward,northward,northward,march
+black sea bass,Spring,northward,northward,northward,march
+blackbelly rosefish,Fall,northward,northward,northward,march
+blackbelly rosefish,Spring,northward,northward,northward,march
+butterfish,Spring,northward,northward,stable,lean
+butterfish,Fall,northward,stable,northward,NA
+chain dogfish,Fall,southward,stable,northward,expand
+chain dogfish,Spring,southward,northward,northward,expand
+cusk,Fall,northward,stable,southward,contract
+cusk,Spring,stable,southward,southward,lean
+fawn cusk-eel,Fall,southward,southward,northward,expand
+fawn cusk-eel,Spring,southward,southward,stable,lean
+fourbeard rockling,Spring,southward,stable,northward,expand
+fourbeard rockling,Fall,stable,northward,northward,lean
+fourspot flounder,Fall,southward,stable,northward,expand
+fourspot flounder,Spring,southward,northward,northward,expand
+goosefish,Spring,northward,northward,southward,contract
+goosefish,Fall,stable,northward,northward,lean
+gulf stream flounder,Fall,southward,stable,northward,expand
+gulf stream flounder,Spring,southward,southward,northward,expand
+haddock,Spring,northward,stable,southward,contract
+haddock,Fall,stable,southward,southward,lean
+jonah crab,Spring,northward,northward,northward,march
+jonah crab,Fall,stable,northward,northward,lean
+little skate,Fall,southward,southward,stable,lean
+little skate,Spring,southward,southward,stable,lean
+longfin squid,Fall,southward,northward,northward,expand
+longfin squid,Spring,stable,southward,northward,NA
+longhorn sculpin,Fall,northward,northward,northward,march
+longhorn sculpin,Spring,northward,northward,northward,march
+northern sand lance,Spring,northward,northward,northward,march
+northern sand lance,Fall,stable,southward,southward,lean
+northern searobin,Fall,northward,northward,northward,march
+northern searobin,Spring,northward,stable,stable,retract
+northern shortfin squid,Fall,southward,southward,southward,march
+northern shortfin squid,Spring,stable,stable,northward,NA
+ocean pout,Fall,northward,northward,northward,march
+ocean pout,Spring,northward,northward,northward,march
+offshore hake,Fall,southward,southward,southward,march
+offshore hake,Spring,southward,southward,southward,march
+pollock,Spring,northward,northward,southward,contract
+pollock,Fall,stable,northward,southward,NA
+red hake,Fall,northward,northward,northward,march
+red hake,Spring,northward,northward,northward,march
+rosette skate,Fall,southward,stable,northward,expand
+rosette skate,Spring,stable,northward,northward,lean
+scup,Spring,northward,northward,northward,march
+scup,Fall,northward,stable,stable,retract
+sea raven,Spring,northward,northward,stable,lean
+sea raven,Fall,northward,stable,stable,retract
+sea scallop,Fall,stable,stable,stable,stable
+sea scallop,Spring,northward,northward,stable,lean
+silver hake,Fall,northward,northward,northward,march
+silver hake,Spring,northward,northward,northward,march
+smooth dogfish,Spring,northward,northward,northward,march
+smooth dogfish,Fall,northward,northward,northward,march
+smooth skate,Fall,northward,northward,northward,march
+smooth skate,Spring,northward,northward,northward,march
+spiny dogfish,Fall,northward,stable,northward,NA
+spiny dogfish,Spring,stable,southward,stable,NA
+spotted hake,Spring,northward,northward,northward,march
+spotted hake,Fall,stable,northward,northward,lean
+summer flounder,Fall,northward,northward,northward,march
+summer flounder,Spring,northward,northward,northward,march
+thorny skate,Fall,northward,stable,southward,contract
+thorny skate,Spring,northward,northward,southward,contract
+white hake,Fall,northward,northward,northward,march
+white hake,Spring,northward,northward,northward,march
+winter flounder,Fall,northward,northward,southward,contract
+winter flounder,Spring,northward,northward,stable,lean
+winter skate,Spring,southward,southward,southward,march
+winter skate,Fall,northward,stable,stable,retract
+witch flounder,Fall,stable,northward,northward,lean
+witch flounder,Spring,stable,southward,stable,NA
+yellowtail flounder,Fall,northward,northward,northward,march
+yellowtail flounder,Spring,northward,northward,northward,march

@@ -10,7 +10,7 @@ editor: visual
 
 Drawing inspiration from Lenoir & Svenning, we aim to characterize general distribution change patterns in species from the NEFSC Bottom Trawl Survey.
 
-![](2014_LenoirandSvenning_RangeShiftReview.jpg){fig-align="center"}
+![](images/2014_LenoirandSvenning_RangeShiftReview.jpg){fig-align="center"}
 
 ```{r}
 #| label: load libraries and dependencies
@@ -27,12 +27,15 @@ library(matrixStats)
 library(ggridges)
 library(gt)
 
-# species data
-species <- read_csv("/Users/clovas/Documents/necc_distributions/Data/speciesList_inNECC.csv") %>%
-  rename("comname" = "Species_comnam") %>%
-  mutate(comname   = tolower(comname)) %>%
-  # filter(NECC == "Y") %>%
-  select(comname)
+# # species data
+# species <- read_csv("/Users/clovas/Documents/necc_distributions/Data/speciesList_inNECC.csv") %>%
+#   rename("comname" = "Species_comnam") %>%
+#   mutate(comname   = tolower(comname)) %>%
+#   # filter(NECC == "Y") %>%
+#   select(comname)
+
+species <- read_csv("/Users/clovas/Documents/Decadal_Variability/Data/species_list_final.csv") # more extensive species list
+
 
 # Load NEFSC Bottom Trawl Survey data ####
 trawl_data <- gmri_survdat_prep(
@@ -43,8 +46,9 @@ clean_survey  <- trawl_data %>%
   distinct(svspp, est_year, survey_area, stratum, tow, id, est_towdate, season, comname, catchsex, .keep_all = T) %>%
   group_by(svspp, est_year, survey_area, stratum, tow, id, est_towdate, season, 
            avgdepth, surftemp, bottemp, decdeg_beglat, decdeg_beglon, comname, abundance) %>% 
-  filter(comname %in% species$comname) %>% 
+  filter(comname %in% species$comname & est_year >= 1970) %>% 
   summarise(biomass_kg = sum(biomass_kg, na.rm = T), .groups = "drop") %>%
+  filter(!est_year %in% c(2017, 2020)) %>% 
   mutate(decade = 10*est_year %/% 10)
 
 ```
@@ -76,7 +80,7 @@ grouped_quantiles <- function(clean_survey, ...){
     mutate(across(where(is.numeric), round, 4))
 }
 
-quantiles <- grouped_quantiles(clean_survey, est_year)
+quantiles <- grouped_quantiles(clean_survey, est_year , season)
 
 ```
 
@@ -93,47 +97,75 @@ quantiles <- grouped_quantiles(clean_survey, est_year)
 # Here we compare the slopes of the 5th, 50th and 95th percentiles of species distributions. Slopes are based on a 5-year rolling average of biomass-weighted latitudes. We characterize the species distribution trends by the direction and significance of the slope. We will examine magnitude in a later analysis.
 
 quantiles %>% 
-  pivot_longer(cols = 6:12, names_to = "quantile", values_to = "lat") %>%
-  select(comname, est_year, quantile, lat) %>%
+  pivot_longer(cols = 7:13, names_to = "quantile", values_to = "lat") %>%
+  select(comname, est_year, season, quantile, lat) %>% # season
   filter(quantile %in% c("5%", "50%", "95%")) %>%
-  group_by(comname, quantile) %>%
+  group_by(comname, quantile, season) %>% # season
   mutate(rollmean = zoo::rollapplyr(lat, width = 5, FUN = mean, align = "center", partial = T)) %>%
-  group_by(comname, quantile) %>%
+  group_by(comname, quantile, season) %>% # season
   nest() %>%
   mutate(mod  = map(data, function(x){lm(est_year ~ rollmean, data = x)}),
          tidy = map(mod, broom::tidy)) -> mods
 
 slopes <- mods %>%
-  select(comname, quantile, tidy) %>%
+  select(comname, quantile, tidy, season) %>% # season
   unnest(tidy) %>%
   filter(!term == "(Intercept)") %>%
   rename("slope" = "estimate") %>%
-  select(comname, quantile, slope, p.value) %>%
+  select(comname, quantile, slope, p.value, season) %>% # season
   mutate(signif   = ifelse(p.value <= 0.05, "true", "false"),
          movement = ifelse(slope > 0, "+", "-"))
 
+# write_rds(mods, file = here("Data", "quantiles_lm.rds"))
+
 # trends
 slopes %>% 
-  select(comname, quantile, signif, movement) %>% 
+  select(comname, quantile, signif, movement, season) %>% # season
   filter(signif == "true" & movement == "+") %>%
   mutate(trend = "northward") %>%
   full_join(slopes %>% 
-              select(comname, quantile, signif, movement) %>% 
+              select(comname, quantile, signif, movement, season) %>% # season
               filter(signif == "true" & movement == "-") %>%
               mutate(trend = "southward")) %>%
   full_join(slopes %>% 
-              select(comname, quantile, signif, movement) %>% 
+              select(comname, quantile, signif, movement, season) %>% # season
               filter(signif == "false" & movement == "-" | signif == "false" & movement == "+") %>%
               mutate(trend = "stable")) %>%
   arrange(comname, quantile) %>%
-  select(comname, quantile, trend) %>%
+  select(comname, quantile, trend, season) %>% # season
   pivot_wider(names_from = "quantile", values_from = "trend") -> trends
   
+
 # trends  %>%
 #   mutate(comname = str_to_sentence(comname)) %>%
 #   gt(groupname_col = NULL) %>% 
 #   tab_spanner(columns = c("5%", "50%", "95%"), label = md("**Percentiles**")) %>%
 #   cols_label(comname = md("**Common name**"))
+
+mods %>%
+  filter(comname %in% c("alewife", "american shad", "atlantic herring", "atlantic mackerel", "blackbelly rosefish", "butterfish", "northern sand lance") & quantile == "50%") %>%
+  select(comname, season, tidy) %>%
+  unnest(tidy) %>%
+  filter(!term == "(Intercept)") %>%
+  mutate(signif = ifelse(p.value < 0.05, T,F)) -> plank_centroids
+
+plank_centroids %>%
+  select(comname, season, estimate) %>%
+  pivot_wider(names_from = "season", values_from = "estimate") %>%
+  mutate(spring_changes = ifelse(`Spring` > `Fall`, T, F)) -> plank_movement
+
+mods %>% # filter out piscivores
+  filter(quantile == "50%") %>%
+  select(comname, season, tidy) %>%
+  unnest(tidy) %>%
+  filter(!term == "(Intercept)") %>%
+  mutate(signif = ifelse(p.value < 0.05, T,F)) -> centroids
+#   
+# centroids %>% 
+#   select(comname, season, estimate) %>% 
+#   pivot_wider(names_from = "season", values_from = "estimate") %>%
+#   mutate(spring_changes = ifelse(`Spring` > `Fall`, T, F)) %>% 
+#   filter(spring_changes == TRUE) -> spring_movers
 
 ```
 
@@ -185,30 +217,95 @@ trends %>%
   full_join(trends) %>% 
   arrange(comname) -> trends # figure out what/who is missing 
 
-write_csv(trends, here("Data", "trends.csv"))
+# write_csv(trends, here("Data", "trends.csv"))
  
-trends %>% 
-  mutate(comname = str_to_sentence(comname)) %>% 
-  select(comname,distribution) %>%
-  pivot_wider(names_from = "distribution", values_from = "comname") %>%
-  gt(groupname_col = NULL) %>%
-  cols_label(
-    stable = md("**Stable**"),
-    march  = md("**March**"),
-    expand = md("**Expand**"),
-    contract = md("**Contract**"),
-    lean     = md("**Lean**"),
-    "NA"     = md("**Unclassified**"),
-    retract  = md("**Retract**")
-  ) %>% 
-  cols_move_to_end("NA") %>%
-  cols_move("expand", after = "march")
+match <- trends %>% 
+  select(comname, season, distribution) %>% 
+  pivot_wider(names_from = "season", values_from = "distribution") %>% 
+  mutate(match = ifelse(`Fall` == `Spring`, T, F))
+
+mis_match <- match %>% 
+  filter(match == FALSE)
+
+weirdos <- match %>% 
+  filter(is.na(match)) %>% 
+  left_join(trends) %>% 
+  select(!c(`Fall`,`Spring`, `match`)) # for all but longfin squid, the weird shifts are happening in the fall
+
+
+# trends %>% 
+#   mutate(comname = str_to_sentence(comname)) %>% 
+#   select(comname,distribution) %>%
+#   pivot_wider(names_from = "distribution", values_from = "comname") %>%
+#   gt(groupname_col = NULL) %>%
+#   cols_label(
+#     stable = md("**Stable**"),
+#     march  = md("**March**"),
+#     expand = md("**Expand**"),
+#     contract = md("**Contract**"),
+#     lean     = md("**Lean**"),
+#     "NA"     = md("**Unclassified**"),
+#     # retract  = md("**Retract**")
+#   ) %>% 
+#   cols_move_to_end("NA") %>%
+#   cols_move("expand", after = "march")
 
 ```
 
-## Rate of movement
+```{r}
+#| label: quantile plots
+#| echo: false
+#| message: false
+#| warning: false
+#| column: page
+#| fig-align: center
+#| fig-height: 11
+#| fig-width: 9
 
-Now we want to explore the magnitude of species movement, coupled with their directional trends, to ultimately compare distribution changes of predator and prey species. We could compare rates of centroid movement, or edges-only.
+lat_shift <- quantiles %>% 
+  pivot_longer(cols = 7:13, names_to = "quantile", values_to = "lat") %>%
+  select(comname, season, est_year, quantile, lat) %>%
+  group_by(comname, season, quantile) %>%
+  mutate(rollmean = zoo::rollapplyr(lat, width = 5, FUN = mean, align = "center", partial = T)) %>%
+  left_join(trends %>% select(comname, distribution)) %>%
+  group_by(comname) 
+
+lat_shift$factor <- factor(lat_shift$quantile, levels = rev(c("5%","10%","25%","50%","75%","90%","95%")))
+
+lat_shift <- lat_shift %>% 
+  group_by(comname) %>% 
+  nest() %>% 
+  mutate(plot = map2(data, comname, function(x,y){
+    out <- ggplot(x) +
+      geom_line(aes(x = est_year, y = rollmean, color = factor), linetype = 2) +
+      geom_smooth(aes(x = est_year, y = rollmean, color = factor), method = "lm", se = F) +
+      ylab("Latitude") + xlab("Year") + ggtitle(str_to_sentence(comname), subtitle = x$classification) + 
+      facet_wrap(~factor(season, levels = c("Spring","Fall")), nrow = 1) +
+      guides(color = guide_legend("Percentiles")) +
+      scale_color_gmri() +
+      theme_gmri(strip.background = element_rect(fill = "transparent"),
+                 strip.text = element_text(color = "black"))
+    
+    # filename = paste(comname, "lat_shift_percentiles.png", sep="_")
+    # ggsave(out, filename = paste(here("Temp_Results", "Lat percentiles"), filename, sep="/"), width = 7, height =  5, units="in", bg = "white")
+    }))
+
+# lat_shift$plot[[27]]
+
+# all_lat_shift <- 
+gridExtra::marrangeGrob(lat_shift$plot, layout_matrix = matrix(1:3, nrow = 3, ncol = 1, byrow = TRUE), top = NULL)
+
+# ggsave(all_lat_shift, file=here("all_latitudinal_shifts.pdf"), width = 8.5, height = 11, units = "in")
+```
+
+```{r}
+#| label: edge movement 
+#| echo: false
+#| warning: false
+#| message: false
+
+
+```
 
 ```{r}
 #| label: quantile movement 
@@ -219,33 +316,38 @@ Now we want to explore the magnitude of species movement, coupled with their dir
 #| fig-height: 13
 #| fig-width: 9
 
-slopes %>% 
-  filter(quantile %in%  c("5%","50%","95%")) %>% 
-  left_join(trends) %>%
-  ungroup() %>%
-  select(comname, slope, quantile, `5%`,`50%`, `95%`) %>%
-  rename("trend_5" = "5%",
-         "trend_50" = "50%", 
-         "trend_95" = "95%") %>% 
-  pivot_wider(names_from = "quantile", values_from = "slope") %>%
-  mutate(comname = str_to_sentence(comname)) %>%
-  gt(groupname_col = NULL) %>% 
-  tab_spanner(columns = c(`5%`, trend_5), label = md("**5th Percentile**")) %>%
-  tab_spanner(columns = c(`50%`, trend_50), label = md("**50th Percentile**")) %>%
-  tab_spanner(columns = c(`95%`, trend_95), label = md("**95th Percentile**")) %>%
-  cols_label(
-      comname = md("**Common name**"),
-      `5%` = md("**Slope**"),
-      `50%` = md("**Slope**"),
-      `95%` = md("**Slope**"),
-      trend_5 = md("**Trend**"),
-      trend_50 = md("**Trend**"),
-      trend_95 = md("**Trend**")
-    ) %>%
-  fmt_number(columns = everything(), decimals = 2) %>%
-  tab_style(
-    style = cell_text(style = "italic"),
-    locations = cells_body(columns = c(trend_5, trend_50, trend_95)))
+## Rate of movement
+
+# Now we want to explore the magnitude of species movement, coupled with their directional trends, to ultimately compare # distribution changes of predator and prey species. We could compare rates of centroid movement, or edges-only.
+
+
+# slopes %>% 
+#   filter(quantile %in%  c("5%","50%","95%")) %>% 
+#   left_join(trends) %>%
+#   ungroup() %>%
+#   select(comname, slope, quantile, `5%`,`50%`, `95%`) %>%
+#   rename("trend_5" = "5%",
+#          "trend_50" = "50%", 
+#          "trend_95" = "95%") %>% 
+#   pivot_wider(names_from = "quantile", values_from = "slope") %>%
+#   mutate(comname = str_to_sentence(comname)) %>%
+#   gt(groupname_col = NULL) %>% 
+#   tab_spanner(columns = c(`5%`, trend_5), label = md("**5th Percentile**")) %>%
+#   tab_spanner(columns = c(`50%`, trend_50), label = md("**50th Percentile**")) %>%
+#   tab_spanner(columns = c(`95%`, trend_95), label = md("**95th Percentile**")) %>%
+#   cols_label(
+#       comname = md("**Common name**"),
+#       `5%` = md("**Slope**"),
+#       `50%` = md("**Slope**"),
+#       `95%` = md("**Slope**"),
+#       trend_5 = md("**Trend**"),
+#       trend_50 = md("**Trend**"),
+#       trend_95 = md("**Trend**")
+#     ) %>%
+#   fmt_number(columns = everything(), decimals = 2) %>%
+#   tab_style(
+#     style = cell_text(style = "italic"),
+#     locations = cells_body(columns = c(trend_5, trend_50, trend_95)))
 
 # mods %>%
 #   filter(quantile == "50%") %>%
@@ -260,74 +362,6 @@ slopes %>%
 #   theme_gmri(legend.position = "bottom",
 #              strip.background = element_rect(fill = "white"),
 #              strip.text = element_text(color = "black"))
-
-
-```
-
-```{r}
-#| label: edge movement 
-#| echo: false
-#| warning: false
-#| message: false
-
-### Edge movement 
-# Here we examine the rates of change for the southern and northern edges (5th and 95th percentiles). 
-
-# slopes %>% 
-#   filter(quantile %in% c("5%", "95%")) %>% 
-#   left_join(trends) %>%
-#   ungroup() %>%
-#   select(comname, slope, quantile, `5%`, `95%`) %>%
-#   rename("trend_5" = "5%",
-#          "trend_95" = "95%") %>% 
-#   pivot_wider(names_from = "quantile", values_from = "slope") %>%
-#   mutate(comname = str_to_sentence(comname)) %>%
-#   gt(groupname_col = NULL) %>% 
-#   tab_spanner(columns = c(`5%`, trend_5), label = md("**5th Percentile**")) %>%
-#   tab_spanner(columns = c(`95%`, trend_95), label = md("**95th Percentile**")) %>%
-#   cols_label(
-#       comname = md("**Common name**"),
-#       `5%` = md("**Slope**"),
-#       `95%` = md("**Slope**"),
-#       trend_5 = md("**Trend**"),
-#       trend_95 = md("**Trend**")
-#     ) %>%
-#   fmt_number(columns = everything(), decimals = 2) %>%
-#   tab_style(
-#     style = cell_text(style = "italic"),
-#     locations = cells_body(columns = c(trend_5, trend_95)))
-
-
-```
-
-```{r}
-#| label: movement by size class...?
-#| echo: false
-#| message: false 
-
-
-```
-
-### Examples of movement categories
-
-![](Temp_Results/Lat%20percentiles/acadian%20redfish_lat_shift_percentiles.png)
-
-![](Temp_Results/Lat%20percentiles/black%20sea%20bass_lat_shift_percentiles.png)
-
-```{r}
-#| label: movement matrix
-#| echo: false
-#| message: false
-# 
-# pred <- c("march", "expand", "contract", "retract", "lean", "stable")
-# prey <- c("march", "expand", "contract", "retract", "lean", "stable")
-# 
-# pred_prey <- cbind(pred, prey)
-# 
-# pred_prey <- as_tibble(pred_prey)
-# 
-# pred_prey %>% 
-#   pivot_wider(names_from = pred, values_from = "NA")
 
 
 ```

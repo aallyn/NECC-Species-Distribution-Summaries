@@ -1,11 +1,13 @@
 ---
 title: "Mixed effects model"
+subtitle: "Seasonal distance predictor"
 format: 
   html:
     toc: true
     self-contained: true
 editor: visual
 ---
+
 ```{r}
 #| label: load data and dependecies
 #| echo: false
@@ -32,13 +34,15 @@ clean_survey  <- trawl_data %>%
   distinct(svspp, est_year, survey_area, stratum, tow, id, est_towdate, year_day, season, comname, catchsex, .keep_all = T) %>%
   group_by(svspp, est_year, survey_area, stratum, tow, id, est_towdate, year_day, season, 
            avgdepth, surftemp, bottemp, decdeg_beglat, decdeg_beglon, comname, abundance) %>% 
-  # filter(comname %in% species$comname) %>% 
   summarise(biomass_kg = sum(biomass_kg, na.rm = T), .groups = "drop")
 
 
 ```
+
 ## Survey tow year days
+
 2017 and 2020 omitted.
+
 ```{r}
 #| label: year day
 #| echo: false
@@ -72,8 +76,11 @@ ggplot(data = tows, aes(x = est_year, y = value, color = stat)) +
 # ggsave("year_day.png", plot, bg = "white")
 
 ```
+
 ## Median year day
+
 2017 and 2020 omitted.
+
 ```{r}
 #| label: delta median
 #| echo: false
@@ -86,6 +93,8 @@ year_day %>%
   summarise(median = median(year_day)) %>% 
   pivot_wider(names_from = "season", values_from = "median") %>% 
   mutate(delta_year_day = (Fall-Spring)) -> delta_year_day
+
+# saveRDS(delta_year_day, here("Data", "trawl_yearday.rds"))
 
 tows %>% 
   filter(stat == "median") %>% 
@@ -107,8 +116,39 @@ ggplot(delta_year_day) +
   theme_gmri()
 
 ```
+
+## Seasonal temperatures by season
+
+Across all tows, are surveyed spring temperatures in the Mid-Atlantic bight comparable to the surveyed fall temperatures in the Gulf of Maine?
+
+```{r}
+#| label: surveyed temps
+#| echo: false
+#| message: false
+#| warning: false
+
+clean_survey %>% 
+  select(est_year, season, surftemp, bottemp, id, survey_area) %>% 
+  ungroup() %>% 
+  filter(!est_year %in% c(2017, 2020)) %>%
+  group_by(est_year, survey_area, season) %>% 
+  summarise(sst = mean(surftemp, na.rm = T),
+            bt  = mean(bottemp,  na.rm = T)) -> survey_temps # maybe do a t-test?  
+
+ggplot(data = survey_temps) + 
+  geom_point(aes(x = est_year, y = sst, color = season)) +
+  geom_line(aes(x = est_year, y = sst, group = est_year)) +
+  facet_wrap(~survey_area) +
+  scale_color_manual(values = c("#ea4f12", "#00608a")) +
+  xlab("Year") + ylab("Sea surface temp") + ggtitle("Surveyed sea surface temperatures") + 
+  theme_gmri()
+
+```
+
 ## Linear mixed effects model
+
 ### SOE 2024 feeding guilds
+
 ```{r}
 #| label: ecodata
 #| echo: false
@@ -120,13 +160,6 @@ library(ecodata)
 species_groupings <- ecodata::species_groupings # from ecodata
 species_upper <- species %>% summarise(COMNAME = toupper(comname))
 
-# garrison_link <- species_groupings %>% 
-#   filter(!is.na(Garrison.Link)) %>% 
-#   filter(COMNAME %in% species_upper$COMNAME) %>% 
-#   arrange(COMNAME) %>%
-#   select(COMNAME, Garrison.Link, SizeCat) %>% 
-#   distinct()
-
 soe_24 <- species_groupings %>% 
   select(COMNAME, SOE.24) %>% 
   filter(COMNAME %in% species_upper$COMNAME) %>% 
@@ -135,12 +168,14 @@ soe_24 <- species_groupings %>%
 ```
 
 #### Linear mixed effects regression (lmer)
+
 `dist_km ~ delta_year_day + est_year*SOE_24 + (1|est_year) + (1|comname)`
+
 ```{r}
 #| label: lme
 #| echo: false
-#| messaage: false
 #| warning: false
+#| message: false
 
 library(lme4)
 library(ggeffects)
@@ -149,21 +184,27 @@ library(glmmTMB)
 # build data frame with seasonal distance, seasonal year-day difference, species groups and year
 
 # run first from updated_species_dist.qmd
-seasonal_dist <- read_rds(here("Data", "seasonal_dist.rds"))
-
-lme <- seasonal_dist %>% 
-  #filter(count == "54") %>% 
+seasonal_dist <- read_rds(here("Data", "seasonal_dist.rds")) %>%
+  filter(count == 53) %>% # only species present in all years (excluding 2020)
   select(comname, data) %>% 
-  unnest(data) %>%
-  drop_na() %>% 
+  unnest(data) %>% 
+  unnest(data) %>% 
+  group_by(comname, est_year) %>%
+  filter(n_distinct(season) == 2)  %>%
+  ungroup() # Assuming there are 2 seasons in total (Spring, Fall) ungroup()
+
+# model dataframe
+lme <- seasonal_dist %>% 
   select(comname, est_year, dist_km) %>% 
   mutate(COMNAME = toupper(comname)) %>% 
   left_join(delta_year_day %>% select(est_year, delta_year_day)) %>%
+  # left_join(delta_sst %>% select(est_year, delta_sst)) %>% 
   left_join(soe_24) %>%
   filter(!est_year %in% c(2017, 2020) & !SOE.24 == "Benthos") %>% 
   drop_na() %>% 
   ungroup() %>% 
-  mutate(SOE_24 = factor(SOE.24, levels = c("Planktivore", "Benthivore", "Piscivore")),
+  distinct() %>% 
+   mutate(SOE_24 = factor(SOE.24, levels = c("Planktivore", "Benthivore", "Piscivore")),
          year_fac = factor(est_year)) # ensuring that the order of variables is consistent across models 
 
 #########
@@ -177,67 +218,88 @@ ggpredict(model_1, terms = c("est_year", "SOE_24")) %>%
 ```
 
 #### Generalized linear mixed model using template model builder (glmmTMB)
+
 `dist_km ~ delta_year_day + est_year*SOE_24 + (1|year_fac) + (1|comname), family=Gamma(link="log")`
+
 ```{r}
 #| label: glmmTMB
 #| echo: false
-#| messaage: false
+#| message: false
 #| warning: false
 
 model_2 <- glmmTMB(dist_km ~ delta_year_day + est_year*SOE_24 + (1|year_fac) + (1|comname), data = lme, family=Gamma(link="log"))
 
-# summary(model_2, correlation = TRUE)
+# summary(model_2)
 
 ggpredict(model_2, terms = c("est_year", "SOE_24")) %>% 
   plot()
 ```
+
 #### Species specific glmm using REML
+
 `dist_km ~ delta_year_day + est_year*comname + (1|year_fac), family = Gamma(link = "log"))`
+
 ```{r}
 #| label: species level model
 #| echo: false
-#| message: false
+#| message: true
+#| warning: true
 #| fig-width: 9
 #| fig-height: 9
 
 library(emmeans)
 
-species_model <- glmmTMB(dist_km ~ 0+delta_year_day + est_year*comname + (1|year_fac), family = Gamma(link = "log"), data = lme, REML = T)
+species_model <- glmmTMB(dist_km ~ delta_year_day + est_year*comname + (1|year_fac), family = Gamma(link = "log"), data = lme, REML = T)
 
-# summary(species_model, correlation = TRUE)
+summary(species_model)
+summary <- summary(species_model)[["coefficients"]]
+coeff <- as.data.frame(summary[["cond"]]) %>% 
+  rownames_to_column() %>%
+  mutate(signif = ifelse(`Pr(>|z|)` < 0.05, T, F)) %>%
+  filter(rowname %in% c(str_subset(rowname, pattern = "est_year"))) %>%
+  mutate(comname = str_remove(rowname, pattern = "est_year:comname"))
 
-# str(confint(species_model, level = 0.95))
-# confint(species_model, level = 0.95)
-
-# ggpredict(species_model, terms = c("est_year", "comname")) %>% 
-#   plot(facets = TRUE, color = "bw", n_rows = 12) 
-
-# predict_response(species_model, c("est_year", "comname"), collapse_tables = TRUE) -> responses
-# 
-# responses %>% 
-#   arrange(group, x) %>% 
-#   rename("est_year" = "x") %>% 
-#   as_tibble() -> responses
-# 
-# ggplot(responses) +
-#   geom_line(aes(x = est_year, y = predicted)) +
-#   geom_ribbon(aes(x = est_year, ymin = conf.low, ymax = conf.high), alpha = 0.3) +
-#   ggtitle("Predicted values of dist_km") +
-#   ylab("dist_km") +
-#   facet_wrap(~group, scales = "free_y", ncol = 4)
+coeff$comname[coeff$rowname == "est_year"] = "acadian redfish"
 
 species_trends <- as.data.frame(emtrends(species_model, "comname", "est_year"))
 
-species_trends %>% 
-  left_join(lme %>% select(comname, SOE_24)) -> species_trends
+coeff %>% 
+  mutate(back_corrected = Estimate+(-0.0061029540)) %>% # back correction included
+  left_join(species_trends) -> test 
 
+trends <- read.csv(here("Data", "trends.csv")) %>%
+  select(comname, season, distribution) # %>% 
+  # pivot_wider(names_from = "season", values_from = "distribution") %>% 
+  # mutate(match = ifelse(`Spring` == `Fall`, T,F)) # movement categories
+
+test %>% 
+  left_join(lme %>% select(comname, SOE_24)) %>% 
+  left_join(trends %>% select(comname, season, distribution)) %>% 
+  distinct() -> species_trends
+
+# species_trends$distribution[is.na(species_trends$distribution)] = "unclassified"
 
 ggplot(species_trends) +
   geom_vline(xintercept = 0.0, color = "#535353", alpha = 0.7) +
-  geom_point(aes(y = forcats::fct_reorder(comname, est_year.trend), x = est_year.trend, color = SOE_24)) + 
-  geom_segment(aes(x = asymp.LCL, xend = asymp.UCL, y = forcats::fct_reorder(comname, est_year.trend), color = SOE_24), alpha = 0.5) +
-  xlim(c(-0.045, 0.045)) +
+  geom_point(aes(y = comname, x = est_year.trend, color = SOE_24, group = SOE_24, pch = signif), size = 3) + 
+  # geom_segment(aes(x = asymp.LCL, xend = asymp.UCL, y = comname, group = SOE_24), alpha = 0.5) +
+  xlim(c(-0.05, 0.05)) +
   xlab("slope") + ylab("species") +
+  facet_grid(~SOE_24) +
+  scale_color_gmri() + 
+  theme_gmri(panel.grid.major = element_line(linetype = 1, color = "#e9e9e9"),
+             panel.grid.minor = element_line(linetype = 1, color = "#e9e9e9"),
+             panel.border = element_rect(linetype = 1, color = "black")) 
+
+species_trends %>% 
+  filter(SOE_24 == "Planktivore") %>% 
+  ggplot() +
+  geom_vline(xintercept = 0.0, color = "#535353", alpha = 0.7) +
+  geom_point(aes(y = comname, x = est_year.trend, color = distribution), size = 3) + 
+  # xlim(c(-0.05, 0.05)) +
+  xlab("slope") + ylab("species") +
+  facet_grid(~season) +
+  scale_color_gmri() + 
   theme_gmri(panel.grid.major = element_line(linetype = 1, color = "#e9e9e9"),
              panel.grid.minor = element_line(linetype = 1, color = "#e9e9e9"),
              panel.border = element_rect(linetype = 1, color = "black")) 
@@ -245,24 +307,27 @@ ggplot(species_trends) +
 
 ```
 
-
-## Model diagnositics
-#### Feeding guild glmm
 ```{r}
-#| label: glmm diag
+#| label: individual species plots
 #| echo: false
 #| message: false
 #| warning: false
+# 
+# install.packages("parameters")
+# library(parameters)
+# 
+# species_response <- as.data.frame(predict_response(species_model, terms = c("est_year", "comname")))
+# model_param <- as.data.frame(model_parameters(species_model))
+# 
+# model_param %>% 
+#   filter(Parameter == "est_year" | Parameter %in% Parameter[42:79]) -> slopes
+# # SEs are still really close to each other
+# 
+# 
+# ggplot(species_response) +
+#   geom_ribbon(aes(x = x, ymin = conf.low, ymax = conf.high), alpha = 0.5) +
+#   geom_line(aes(x = x, y = predicted)) +
+#   facet_wrap(~group, scales = "free_y")
 
-library(DHARMa)
-
-plot(simulateResiduals(model_2))
-
-car::Anova(model_2)
-
-# effects::allEffects(model_2)
-
-# MuMIn::dredge(model_2)
 
 ```
-
